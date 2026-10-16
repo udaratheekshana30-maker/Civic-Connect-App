@@ -1,0 +1,147 @@
+rules_version = '2';
+
+// CivicConnect security rules.
+// Roles live in users/{uid}.role: 'citizen' (default) | 'officer' | 'admin'.
+// Roles are set only with the Admin SDK (scripts/seed.ts set-role) or the
+// Firebase console — never from the app.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function myRole() {
+      let path = /databases/$(database)/documents/users/$(me());
+      return signedIn() && exists(path) ? get(path).data.role : 'citizen';
+    }
+    function isStaff() { return myRole() in ['officer', 'admin']; }
+    function isAdmin() { return myRole() == 'admin'; }
+    function changedKeys() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function onlyChanged(keys) { return changedKeys().hasOnly(keys); }
+    function validStatus(s) { return s in ['submitted', 'review', 'assigned', 'progress', 'resolved', 'rejected']; }
+
+    // ---------- users ----------
+    // Own doc only. Created as 'citizen'; the role can never be changed by the user.
+    match /users/{userId} {
+      allow read: if signedIn() && me() == userId;
+      allow create: if signedIn() && me() == userId
+        && request.resource.data.role == 'citizen'
+        && request.resource.data.keys().hasOnly(['name', 'email', 'phone', 'role', 'language', 'textSize',
+                                                 'notifyPush', 'notifySms', 'notifyEmail', 'createdAt']);
+      allow update: if signedIn() && me() == userId
+        && onlyChanged(['name', 'phone', 'language', 'textSize', 'notifyPush', 'notifySms', 'notifyEmail']);
+      allow delete: if false;
+    }
+
+    // ---------- catalogue ----------
+    match /categories/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /departments/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------- short report IDs (CC1000, CC1001, ...) ----------
+    // Only ever +1, inside the same transaction that creates the report.
+    match /counters/reports {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.keys().hasOnly(['next']) && request.resource.data.next == 1001;
+      allow update: if signedIn() && request.resource.data.keys().hasOnly(['next'])
+        && request.resource.data.next == resource.data.next + 1;
+    }
+
+    // ---------- reports ----------
+    match /reports/{reportId} {
+      // Any signed-in user (incl. anonymous) can see reports: needed for the map,
+      // nearby list and duplicate check. Reporter names are only stored when the
+      // citizen did not choose "anonymous".
+      allow read: if signedIn();
+
+      // Anyone signed in can create — as themselves, in the initial state, with
+      // the id the counter just handed out.
+      allow create: if signedIn()
+        && request.resource.data.reporterId == me()
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.supportCount == 0
+        && request.resource.data.supporters.size() == 0
+        && request.resource.data.resolvedConfirmed == null
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 500
+        && request.resource.data.media.size() <= 5
+        && (request.resource.data.severity == null || request.resource.data.severity in ['low', 'medium', 'high'])
+        && reportId == 'CC' + string(getAfter(/databases/$(database)/documents/counters/reports).data.next - 1)
+        && request.resource.data.keys().hasOnly(['reporterId', 'reporterName', 'isAnonymous', 'categoryId', 'group',
+            'description', 'severity', 'seenAt', 'media', 'location', 'geohash', 'area', 'status', 'departmentId',
+            'supportCount', 'supporters', 'createdAt', 'updatedAt', 'resolvedConfirmed']);
+
+      allow update: if
+        // 1) Officer/admin: status, department (+ resetting confirmation when re-resolving)
+        (isStaff()
+          && onlyChanged(['status', 'departmentId', 'updatedAt', 'resolvedConfirmed'])
+          && validStatus(request.resource.data.status))
+
+        // 2) Reporter: edit the description until the report is reviewed
+        || (resource.data.reporterId == me()
+          && resource.data.status == 'submitted'
+          && onlyChanged(['description', 'updatedAt'])
+          && request.resource.data.description.size() <= 500)
+
+        // 3) Reporter: answer "Is this issue fixed?" once it is resolved
+        || (resource.data.reporterId == me()
+          && resource.data.status == 'resolved'
+          && onlyChanged(['resolvedConfirmed'])
+          && request.resource.data.resolvedConfirmed is bool)
+
+        // 4) Any citizen: add or remove ONLY their own support (+1 / -1)
+        || (signedIn() && onlyChanged(['supporters', 'supportCount']) && (
+             (!(me() in resource.data.supporters)
+               && request.resource.data.supporters.hasAll(resource.data.supporters)
+               && me() in request.resource.data.supporters
+               && request.resource.data.supporters.size() == resource.data.supporters.size() + 1
+               && request.resource.data.supportCount == resource.data.supportCount + 1)
+          || ((me() in resource.data.supporters)
+               && resource.data.supporters.hasAll(request.resource.data.supporters)
+               && !(me() in request.resource.data.supporters)
+               && request.resource.data.supporters.size() == resource.data.supporters.size() - 1
+               && request.resource.data.supportCount == resource.data.supportCount - 1)
+        ));
+
+      allow delete: if isAdmin();
+
+      // Status history — written only by officers/admins.
+      match /timeline/{entryId} {
+        allow read: if signedIn();
+        allow create: if isStaff()
+          && validStatus(request.resource.data.status)
+          && request.resource.data.byRole == myRole()
+          && request.resource.data.remark is string
+          && request.resource.data.remark.size() <= 500;
+        allow update, delete: if isAdmin();
+      }
+
+      // Extra info/photos from any citizen ("Add info / photo").
+      match /additions/{additionId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.userId == me()
+          && request.resource.data.text is string
+          && request.resource.data.text.size() <= 300
+          && request.resource.data.media.size() <= 3;
+        allow delete: if isAdmin() || (signedIn() && resource.data.userId == me());
+        allow update: if false;
+      }
+    }
+
+    // ---------- notifications ----------
+    // Created by officers/admins (alongside a status update); only the owner
+    // can read them and flip `read`.
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.userId == me();
+      allow create: if isStaff() && request.resource.data.read == false;
+      allow update: if signedIn() && resource.data.userId == me() && onlyChanged(['read']);
+      allow delete: if signedIn() && resource.data.userId == me();
+    }
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "expo": {
+    "name": "CivicConnect",
+    "slug": "civicconnect",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#2E7D32",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.KND_HCI_G13.CivicConnect",
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-localization",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "color": "#2E7D32"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#2E7D32",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 120
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "CivicConnect uses your location to place your report on the map and show nearby issues."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "CivicConnect needs your photos so you can attach them to a report.",
+          "cameraPermission": "CivicConnect uses the camera so you can photograph the issue."
+        }
+      ]
+    ],
+    "scheme": "civicconnect",
+    "platforms": [
+      "android"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ab62f488-c516-497b-998e-235884e2c716"
+      }
+    },
+    "owner": "awantha",
+    "updates": {
+      "url": "https://u.expo.dev/ab62f488-c516-497b-998e-235884e2c716"
+    },
+    "ios": {}
+  }
+}
